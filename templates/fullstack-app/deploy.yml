@@ -1,0 +1,251 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: {{PROJECT_NAME}}-prod
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, 'skip-ci') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: {{PNPM_VERSION}}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "{{NODE_VERSION}}"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+        continue-on-error: true
+
+      - run: pnpm build
+        env:
+          NODE_ENV: production
+
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          rm -rf deployment-package
+          mkdir -p deployment-package
+          cp -r dist deployment-package/
+          cp -r {{API_DIR}} deployment-package/
+          cp package.json deployment-package/
+          cp pnpm-lock.yaml deployment-package/
+
+          printf '%s\n' \
+            '{' \
+            '  "commit": "${{ github.sha }}",' \
+            '  "branch": "${{ github.ref_name }}",' \
+            '  "author": "${{ github.actor }}",' \
+            '  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",' \
+            '  "workflow_run": "${{ github.run_id }}"' \
+            '}' \
+            > deployment-package/deployment-info.json
+
+          test -d deployment-package/dist || { echo "dist/ missing"; exit 1; }
+          test -d "deployment-package/{{API_DIR}}" || { echo "{{API_DIR}}/ missing"; exit 1; }
+          test -f deployment-package/package.json || { echo "package.json missing"; exit 1; }
+          test -f deployment-package/pnpm-lock.yaml || { echo "pnpm-lock.yaml missing"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: {{PROJECT_NAME}}-${{ github.sha }}
+          path: deployment-package/
+          retention-days: 7
+          compression-level: 9
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 480
+    permissions: {}
+    environment:
+      name: production
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: {{PROJECT_NAME}}-${{ github.sha }}
+          path: deployment-package
+
+      - name: Create deployment tarball
+        run: |
+          set -euo pipefail
+          cd deployment-package
+          tar -czf ../deploy.tar.gz .
+          cd ..
+
+      - name: Upload tarball to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DO_HOST }}
+          port: ${{ secrets.DO_SSH_PORT || 22 }}
+          username: ${{ secrets.DO_SSH_USER || 'deploy' }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          source: deploy.tar.gz
+          target: /tmp
+          overwrite: true
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DO_HOST }}
+          port: ${{ secrets.DO_SSH_PORT || 22 }}
+          username: ${{ secrets.DO_SSH_USER || 'deploy' }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            APP_DIR="{{APP_DIR}}"
+            RELEASES_DIR="$APP_DIR/releases"
+            CURRENT_LINK="$APP_DIR/current"
+            RUNTIME_DIR="$CURRENT_LINK/{{API_DIR}}"
+            PM2_APP_NAME="{{PM2_APP_NAME}}"
+
+            TS="$(date -u +%Y%m%dT%H%M%SZ)"
+            RELEASE_ID="${TS}-${{ github.run_id }}-${{ github.sha }}"
+            NEW_RELEASE="$RELEASES_DIR/$RELEASE_ID"
+            TMP_DIR="/tmp/{{PROJECT_NAME}}-$RELEASE_ID"
+            ENV_FILE="$NEW_RELEASE/{{API_DIR}}/.env"
+
+            echo "Deploying release: $RELEASE_ID"
+
+            mkdir -p "$RELEASES_DIR"
+            rm -rf "$TMP_DIR"
+            mkdir -p "$TMP_DIR"
+
+            echo "Extracting artifact..."
+            tar -xzf /tmp/deploy.tar.gz -C "$TMP_DIR" --no-same-owner --no-same-permissions
+
+            test -d "$TMP_DIR/dist" || { echo "dist/ missing"; exit 1; }
+            test -d "deployment-package/{{API_DIR}}" || { echo "{{API_DIR}}/ missing"; exit 1; }
+            test -f "$TMP_DIR/package.json" || { echo "package.json missing"; exit 1; }
+            test -f "$TMP_DIR/pnpm-lock.yaml" || { echo "pnpm-lock.yaml missing"; exit 1; }
+
+            echo "Creating release dir..."
+            mkdir -p "$NEW_RELEASE"
+            rsync -a --delete "$TMP_DIR/" "$NEW_RELEASE/"
+
+            echo "Writing .env into release..."
+            mkdir -p "$NEW_RELEASE/{{API_DIR}}"
+            printf '%s\n' \
+              "NODE_ENV=production" \
+              "PORT=${{ secrets.PORT || 3001 }}" \
+              > "$ENV_FILE"
+            chmod 600 "$ENV_FILE"
+
+            PREV_RELEASE=""
+            if [ -L "$CURRENT_LINK" ]; then
+              PREV_RELEASE="$(readlink -f "$CURRENT_LINK" || true)"
+            fi
+
+            echo "Switching current -> $NEW_RELEASE"
+            ln -sfn "$NEW_RELEASE" "$CURRENT_LINK"
+
+            echo "Installing production dependencies..."
+            cd "$RUNTIME_DIR"
+            if ! command -v pnpm >/dev/null 2>&1; then
+              corepack enable
+              corepack prepare pnpm@{{PNPM_VERSION}} --activate
+            fi
+            pnpm install --prod --frozen-lockfile
+
+            echo "Restarting with pm2..."
+            cd "$RUNTIME_DIR"
+            PM2_EXIT=0
+            set +e
+            pm2 restart "$PM2_APP_NAME"
+            PM2_EXIT=$?
+            if [ "$PM2_EXIT" -ne 0 ]; then
+              echo "Not running in pm2 yet, starting a new process"
+              pm2 start ecosystem.config.cjs --name "$PM2_APP_NAME"
+              PM2_EXIT=$?
+              if [ "$PM2_EXIT" -eq 0 ]; then
+                pm2 save
+              fi
+            fi
+            set -e
+
+            if [ "$PM2_EXIT" -ne 0 ]; then
+              echo "pm2 command failed"
+              pm2 show "$PM2_APP_NAME" || true
+              pm2 logs "$PM2_APP_NAME" --lines 100 --nostream || true
+              if [ -n "$PREV_RELEASE" ] && [ -d "$PREV_RELEASE" ]; then
+                echo "Rolling back current -> $PREV_RELEASE"
+                ln -sfn "$PREV_RELEASE" "$CURRENT_LINK"
+                pm2 restart "$PM2_APP_NAME" || true
+              fi
+              exit 1
+            fi
+
+            echo "Waiting for service..."
+            sleep 3
+
+            if pm2 list | grep -q "$PM2_APP_NAME.*online"; then
+              echo "Service is running"
+            else
+              echo "Service failed to start"
+              pm2 logs "$PM2_APP_NAME" --lines 100 --nostream || true
+              if [ -n "$PREV_RELEASE" ] && [ -d "$PREV_RELEASE" ]; then
+                echo "Rolling back current -> $PREV_RELEASE"
+                ln -sfn "$PREV_RELEASE" "$CURRENT_LINK"
+                pm2 restart "$PM2_APP_NAME" || true
+              fi
+              exit 1
+            fi
+
+            echo "Health check..."
+            HEALTH_CODE="$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${{ secrets.PORT || 3001 }}/api/health" || echo "000")"
+            if [ "$HEALTH_CODE" = "200" ]; then
+              echo "Health check OK (HTTP 200)"
+            else
+              echo "Health check returned HTTP $HEALTH_CODE"
+              pm2 show "$PM2_APP_NAME" || true
+            fi
+
+            echo "Cleanup..."
+            rm -rf "$TMP_DIR"
+            rm -f /tmp/deploy.tar.gz
+
+            echo "Keep last 5 releases..."
+            ls -1dt "$RELEASES_DIR"/* 2>/dev/null | tail -n +6 | xargs -r rm -rf --
+
+            echo "Deployment complete."
+
+      - name: Verify (server)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DO_HOST }}
+          port: ${{ secrets.DO_SSH_PORT || 22 }}
+          username: ${{ secrets.DO_SSH_USER || 'deploy' }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            echo "Current:"
+            readlink -f "{{APP_DIR}}/current" || true
+            echo ""
+            pm2 show "{{PM2_APP_NAME}}" || true
+            echo ""
+            pm2 logs "{{PM2_APP_NAME}}" --lines 50 --nostream || true

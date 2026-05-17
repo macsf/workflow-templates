@@ -1,0 +1,150 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: {{PROJECT_NAME}}-prod
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: {{PNPM_VERSION}}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "{{NODE_VERSION}}"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+        continue-on-error: true
+
+      - run: pnpm build
+        env:
+          NODE_ENV: production
+
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          rm -rf deployment-package
+          mkdir -p deployment-package
+          cp -r dist deployment-package/
+
+          printf '%s\n' \
+            '{' \
+            '  "commit": "${{ github.sha }}",' \
+            '  "branch": "${{ github.ref_name }}",' \
+            '  "author": "${{ github.actor }}",' \
+            '  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",' \
+            '  "workflow_run": "${{ github.run_id }}"' \
+            '}' \
+            > deployment-package/deployment-info.json
+
+          test -d deployment-package/dist || { echo "dist/ missing"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: {{PROJECT_NAME}}-${{ github.sha }}
+          path: deployment-package/
+          retention-days: 7
+          compression-level: 9
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: {}
+    environment:
+      name: production
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: {{PROJECT_NAME}}-${{ github.sha }}
+          path: deployment-package
+
+      - name: Create deployment tarball
+        run: |
+          set -euo pipefail
+          cd deployment-package
+          tar -czf ../deploy.tar.gz .
+          cd ..
+
+      - name: Upload tarball to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DO_HOST }}
+          port: ${{ secrets.DO_SSH_PORT || 22 }}
+          username: ${{ secrets.DO_SSH_USER || 'deploy' }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          source: deploy.tar.gz
+          target: /tmp
+          overwrite: true
+
+      - name: Activate release on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DO_HOST }}
+          port: ${{ secrets.DO_SSH_PORT || 22 }}
+          username: ${{ secrets.DO_SSH_USER || 'deploy' }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            APP_DIR="{{APP_DIR}}"
+            RELEASES_DIR="$APP_DIR/releases"
+            CURRENT_LINK="$APP_DIR/current"
+
+            TS="$(date -u +%Y%m%dT%H%M%SZ)"
+            RELEASE_ID="${TS}-${{ github.run_id }}-${{ github.sha }}"
+            NEW_RELEASE="$RELEASES_DIR/$RELEASE_ID"
+            TMP_DIR="/tmp/{{PROJECT_NAME}}-$RELEASE_ID"
+
+            echo "Deploying release: $RELEASE_ID"
+
+            mkdir -p "$RELEASES_DIR"
+            rm -rf "$TMP_DIR"
+            mkdir -p "$TMP_DIR"
+
+            tar -xzf /tmp/deploy.tar.gz -C "$TMP_DIR" --no-same-owner --no-same-permissions
+
+            test -d "$TMP_DIR/dist" || { echo "dist/ missing"; exit 1; }
+
+            mkdir -p "$NEW_RELEASE"
+            rsync -a --delete "$TMP_DIR/" "$NEW_RELEASE/"
+
+            PREV_RELEASE=""
+            if [ -L "$CURRENT_LINK" ]; then
+              PREV_RELEASE="$(readlink -f "$CURRENT_LINK" || true)"
+            fi
+
+            ln -sfn "$NEW_RELEASE/dist" "$CURRENT_LINK"
+
+            sudo -n /usr/bin/systemctl reload apache2 || sudo -n /usr/sbin/service nginx reload || echo "Server reload skipped"
+
+            echo "Cleanup..."
+            rm -rf "$TMP_DIR"
+            rm -f /tmp/deploy.tar.gz
+
+            echo "Keep last 5 releases..."
+            ls -1dt "$RELEASES_DIR"/* 2>/dev/null | tail -n +6 | xargs -r rm -rf --
+
+            echo "Deployment complete."
