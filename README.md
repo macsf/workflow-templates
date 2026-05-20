@@ -47,6 +47,11 @@ These GitHub secrets must be set in the target repo for deploy workflows:
 | `DO_SSH_PASSPHRASE` | deploy | SSH key passphrase |
 | `PORT` | fullstack | App listen port (default 3001) |
 
+## Deployment Notes
+
+- For `appleboy/ssh-action`, prefer writing remote `.env` files with direct `${{ secrets.NAME }}` interpolation inside the `script:` block.
+- Avoid forwarding app secrets through the action's `env` and `envs` inputs unless there is a specific need. In practice, direct interpolation is simpler and avoids shell-wrapper leakage from the underlying `drone-ssh` runner.
+
 ## Templates
 
 All templates use `{{PLACEHOLDER}}` syntax replaced by the scaffold script:

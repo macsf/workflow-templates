@@ -140,7 +140,7 @@ jobs:
             tar -xzf /tmp/deploy.tar.gz -C "$TMP_DIR" --no-same-owner --no-same-permissions
 
             test -d "$TMP_DIR/dist" || { echo "dist/ missing"; exit 1; }
-            test -d "deployment-package/{{API_DIR}}" || { echo "{{API_DIR}}/ missing"; exit 1; }
+            test -d "$TMP_DIR/{{API_DIR}}" || { echo "{{API_DIR}}/ missing"; exit 1; }
             test -f "$TMP_DIR/package.json" || { echo "package.json missing"; exit 1; }
             test -f "$TMP_DIR/pnpm-lock.yaml" || { echo "pnpm-lock.yaml missing"; exit 1; }
 
