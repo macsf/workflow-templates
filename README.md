@@ -52,45 +52,27 @@ These GitHub secrets must be set in the target repo for deploy workflows:
 - For `appleboy/ssh-action`, prefer writing remote `.env` files with direct `${{ secrets.NAME }}` interpolation inside the `script:` block.
 - Avoid forwarding app secrets through the action's `env` and `envs` inputs unless there is a specific need. In practice, direct interpolation is simpler and avoids shell-wrapper leakage from the underlying `drone-ssh` runner.
 
-## Release Versioning
+## Release Versioning (fullstack only)
 
-For application repos that use `package.json` as the shared version source, prefer a separate release workflow over version bumping inside `deploy.yml`.
+The fullstack template includes optional version bumping during deploy. When enabled (`deploy-with-bump.yml`):
 
-Recommended pattern:
+**Bump from commit message flags:**
 
-- `release.yml` owns semantic versioning
-- `deploy.yml` only builds and deploys an already-versioned commit
-- `package.json` remains the canonical app version
+- No flag -> patch
+- `#minor` in message -> minor
+- `#major` in message -> major
+- `#none` in message -> skip version bump
 
-`semantic-release` is a good fit when the team can follow Conventional Commits:
+**Workflow:**
 
-- `fix:` -> patch
-- `feat:` -> minor
-- `feat!:` or `BREAKING CHANGE:` -> major
+1. Make your change, commit with flag: `git commit -m "feat: new feature #minor"`
+2. Push to main — deploy runs and bumps version + updates README
+3. `package.json` version matches deployed code
+4. All 5 previous releases kept on server for rollback
 
-Recommended workflow shape:
+**When to use:** Small teams, rapid iteration, straightforward versioning.
 
-1. push or merge to `main`
-2. run a dedicated release workflow
-3. compute the next version from commit messages
-4. update `package.json`
-5. optionally update `CHANGELOG.md`
-6. create a Git tag such as `v1.4.2`
-7. let deploy consume that released commit or tag
-
-Benefits:
-
-- deploy stays immutable and does not mutate `main`
-- release history, tags, and `package.json` stay aligned
-- versioning logic is separated from deployment logic
-
-Operational guidance:
-
-- use squash merges or otherwise keep commit history clean
-- enforce Conventional Commits if you want reliable automated versioning
-- prefer running release before deploy, not during deploy
-
-If a repo is not ready for Conventional Commits discipline, prefer a manual release process or Changesets instead of embedding version bumps in deploy.
+**When to skip:** Complex release cycles, strict semantic versioning requirements, or repos not ready for Conventional Commits discipline.
 
 ## Templates
 
