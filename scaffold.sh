@@ -88,14 +88,10 @@ case "$TIER" in
     PM2_APP_NAME=$(prompt "PM2_APP_NAME" "PM2 process name" "$PROJECT_NAME")
 
     echo ""
-    echo "Install fullstack CI + deploy workflows..."
+    echo "Install fullstack CI + release + deploy workflows..."
     render "$TEMPLATES_DIR/fullstack-app/ci.yml" "$TARGET/.github/workflows/ci.yml"
-
-    if confirm "Include version bump on deploy?"; then
-      render "$TEMPLATES_DIR/fullstack-app/deploy-with-bump.yml" "$TARGET/.github/workflows/deploy.yml"
-    else
-      render "$TEMPLATES_DIR/fullstack-app/deploy.yml" "$TARGET/.github/workflows/deploy.yml"
-    fi
+    render "$TEMPLATES_DIR/fullstack-app/release.yml" "$TARGET/.github/workflows/release.yml"
+    render "$TEMPLATES_DIR/fullstack-app/deploy.yml" "$TARGET/.github/workflows/deploy.yml"
     ;;
 
   *)

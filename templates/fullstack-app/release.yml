@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        required: false
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - none
+
+permissions:
+  contents: write
+
+concurrency:
+  group: {{PROJECT_NAME}}-release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    if: ${{ github.event_name == 'workflow_dispatch' || ((startsWith(github.event.head_commit.message, 'feat:') || startsWith(github.event.head_commit.message, 'feat(') || startsWith(github.event.head_commit.message, 'fix:') || startsWith(github.event.head_commit.message, 'fix(') || startsWith(github.event.head_commit.message, 'hotfix:') || startsWith(github.event.head_commit.message, 'hotfix(') || startsWith(github.event.head_commit.message, 'chore:') || startsWith(github.event.head_commit.message, 'chore(') || startsWith(github.event.head_commit.message, 'refactor:') || startsWith(github.event.head_commit.message, 'refactor(') || startsWith(github.event.head_commit.message, 'docs:') || startsWith(github.event.head_commit.message, 'docs(') || startsWith(github.event.head_commit.message, 'test:') || startsWith(github.event.head_commit.message, 'test(') || startsWith(github.event.head_commit.message, 'perf:') || startsWith(github.event.head_commit.message, 'perf(') || startsWith(github.event.head_commit.message, 'style:') || startsWith(github.event.head_commit.message, 'style(')) && !startsWith(github.event.head_commit.message, 'chore(release):')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: production
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: {{PNPM_VERSION}}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "{{NODE_VERSION}}"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - name: Determine bump type
+        id: bump
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "type=${{ inputs.bump }}" >> "$GITHUB_OUTPUT"
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            if echo "$MSG" | grep -q "#major"; then
+              echo "type=major" >> "$GITHUB_OUTPUT"
+            elif echo "$MSG" | grep -q "#minor"; then
+              echo "type=minor" >> "$GITHUB_OUTPUT"
+            else
+              echo "type=patch" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Bump version
+        if: steps.bump.outputs.type != 'none'
+        run: |
+          TYPE=${{ steps.bump.outputs.type }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          npm version "$TYPE" --no-git-tag-version
+          NEW_VER=$(jq -r '.version' package.json)
+
+          sed -i "s/version-[0-9.]*-blue/version-${NEW_VER}-blue/" README.md
+
+          git add package.json README.md
+          git commit -m "chore(release): v${NEW_VER}"
+          git tag "v${NEW_VER}"
+          git push origin main --follow-tags
