@@ -95,7 +95,7 @@ Ecosystem is `npm` even for pnpm projects (Dependabot does not have a `pnpm` eco
 |-------------|---------|---------|
 | `{{PROJECT_NAME}}` | — | All |
 | `{{PNPM_VERSION}}` | 10 | All |
-| `{{NODE_VERSION}}` | 22 | All |
+| `{{NODE_VERSION}}` | 24 | All |
 | `{{APP_DIR}}` | /opt/{{PROJECT_NAME}} | static-app deploy |
 
 ## Templates
