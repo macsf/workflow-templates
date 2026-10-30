@@ -6,7 +6,7 @@ Reusable GitHub Actions templates for macsf / BrandBaker projects.
 
 | Tier | Description | Files | Example |
 |------|-------------|-------|---------|
-| **library** | CI only: typecheck, lint, test, build | `ci.yml` | the-date-picker |
+| **library** | CI only: typecheck, lint, test, build | `ci.yml` | the-date-picker, CLI tools |
 | **static-app** | CI + static deploy (SCP dist, symlink, reload) | `ci.yml`, `deploy.yml` | vent-astro |
 | **docker-hostinger** | CI + GHCR image + Hostinger VPS (Traefik) | `ci.yml`, `deploy.yml`, `deploy-gate.sh` | money-manager, probation-evaluation |
 | **docker-compose** | CI only. Dokploy, Coolify, or any Compose host builds the image | `ci.yml` | meridian-insights, influencer_db, social-media-perf-charting |
