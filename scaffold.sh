@@ -66,7 +66,7 @@ if [ "${#PROJECT_NAME}" -lt 3 ]; then
 fi
 
 PNPM_VERSION=$(prompt "PNPM_VERSION" "pnpm version" "10")
-NODE_VERSION=$(prompt "NODE_VERSION" "Node version" "22")
+NODE_VERSION=$(prompt "NODE_VERSION" "Node version" "24")
 
 echo ""
 echo "Select project tier:"

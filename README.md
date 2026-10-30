@@ -6,7 +6,7 @@ Reusable GitHub Actions templates for macsf / BrandBaker projects.
 
 | Tier | Description | Files | Example |
 |------|-------------|-------|---------|
-| **library** | CI only: typecheck, lint, test, build | `ci.yml` | the-date-picker |
+| **library** | CI only: typecheck, lint, test, build | `ci.yml` | the-date-picker, CLI tools |
 | **static-app** | CI + static deploy (SCP dist, symlink, reload) | `ci.yml`, `deploy.yml` | vent-astro |
 | **docker-hostinger** | CI + GHCR image + Hostinger VPS (Traefik) | `ci.yml`, `deploy.yml`, `deploy-gate.sh` | money-manager, probation-evaluation |
 | **docker-compose** | CI only. Dokploy, Coolify, or any Compose host builds the image | `ci.yml` | meridian-insights, influencer_db, social-media-perf-charting |
@@ -95,7 +95,7 @@ Ecosystem is `npm` even for pnpm projects (Dependabot does not have a `pnpm` eco
 |-------------|---------|---------|
 | `{{PROJECT_NAME}}` | — | All |
 | `{{PNPM_VERSION}}` | 10 | All |
-| `{{NODE_VERSION}}` | 22 | All |
+| `{{NODE_VERSION}}` | 24 | All |
 | `{{APP_DIR}}` | /opt/{{PROJECT_NAME}} | static-app deploy |
 
 ## Templates

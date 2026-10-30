@@ -6,7 +6,7 @@ Scaffolding library for GitHub Actions. Not a runnable application.
 
 | Folder | When to use |
 | --- | --- |
-| `library` | npm package / shared lib. CI only. |
+| `library` | npm package, CLI, or shared lib. CI only. |
 | `static-app` | Static site (Astro, Vite SPA without an API). SCP + symlink. |
 | `docker-hostinger` | App on the Hostinger VPS. GHCR + `hostinger/deploy-on-vps@v2` + Traefik labels. |
 | `docker-compose` | App on Dokploy, Coolify, or any Compose host. CI only; the platform builds. |
