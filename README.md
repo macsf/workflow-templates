@@ -1,115 +1,113 @@
 # workflow-templates
 
-Reusable GitHub Actions workflow templates for macsf projects.
+Reusable GitHub Actions templates for macsf / BrandBaker projects.
 
 ## Tiers
 
-| Tier | Description | Files | Example project |
-|------|-------------|-------|-----------------|
-| **library** | CI only — typecheck, lint, test, build | `ci.yml` | the-date-picker |
-| **static-app** | CI + static deploy — SCP dist, symlink, reload | `ci.yml`, `deploy.yml` | vent-astro |
-| **fullstack** | CI + release + blue-green deploy — pm2, rollback, health check | `ci.yml`, `release.yml`, `deploy.yml` | money-manager, seeurl |
+| Tier | Description | Files | Example |
+|------|-------------|-------|---------|
+| **library** | CI only: typecheck, lint, test, build | `ci.yml` | the-date-picker |
+| **static-app** | CI + static deploy (SCP dist, symlink, reload) | `ci.yml`, `deploy.yml` | vent-astro |
+| **docker-hostinger** | CI + GHCR image + Hostinger VPS (Traefik) | `ci.yml`, `deploy.yml`, `deploy-gate.sh` | money-manager, probation-evaluation |
+| **docker-compose** | CI only. Dokploy, Coolify, or any Compose host builds the image | `ci.yml` | meridian-insights, influencer_db, social-media-perf-charting |
+
+Dependabot (`dependabot.yml`) is offered for every tier.
 
 ## Usage
 
 ```bash
-# Clone the templates
 git clone git@github.com:macsf/workflow-templates.git
-
-# Run the scaffold in your project root
 cd my-project
 ../workflow-templates/scaffold.sh
 ```
 
-Or run from any directory:
+Or from any directory:
 
 ```bash
 /path/to/workflow-templates/scaffold.sh /path/to/my-project
 ```
 
-The script will prompt for:
-- Project name
-- pnpm / Node version
-- Tier (library, static-app, or fullstack)
-- API subdirectory and PM2 name (fullstack only)
+The script prompts for project name, pnpm / Node version, and tier.
 
-## Secrets to configure
+## Docker schemes
 
-These GitHub secrets must be set in the target repo for deploy workflows:
+Two production shapes. Pick one; do not mix Traefik labels with a platform that injects its own.
 
-| Secret | Required for | Description |
-|--------|-------------|-------------|
-| `DO_HOST` | deploy | DigitalOcean server IP |
-| `DO_SSH_PORT` | deploy | SSH port (default 22) |
-| `DO_SSH_USER` | deploy | SSH username (default `deploy`) |
-| `DO_SSH_KEY` | deploy | SSH private key |
-| `APP_PORT` | fullstack | App listen port (default 3001) |
-| `FRONTEND_URL` | fullstack | Public URL of the frontend |
-| `DATABASE_URL` | fullstack | Database connection string |
-| `SESSION_SECRET` | fullstack | HMAC session secret (min 32 chars) |
-| `GOOGLE_CLIENT_ID` | fullstack | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | fullstack | Google OAuth client secret |
-| `ALLOWED_EMAILS` | fullstack | Comma-separated allowed emails (optional) |
-| `VITE_GOOGLE_CLIENT_ID` | fullstack build | Google client ID exposed to frontend |
+### Hostinger (`docker-hostinger`)
 
-## Deployment Notes
+GitHub Actions builds and pushes `ghcr.io/<owner>/<repo>:<sha>` (and `:latest`), then `hostinger/deploy-on-vps@v2` deploys `docker-compose.yml` on the VPS.
 
-- For `appleboy/ssh-action`, prefer writing remote `.env` files with direct `${{ secrets.NAME }}` interpolation inside the `script:` block.
-- Avoid forwarding app secrets through the action's `env` and `envs` inputs unless there is a specific need. In practice, direct interpolation is simpler and avoids shell-wrapper leakage from the underlying `drone-ssh` runner.
+- Compose **pulls** the GHCR image (`APP_IMAGE`). No `build:` key (Hostinger does not build).
+- Publish the app on `127.0.0.1` only. Traefik on the VPS uses host networking and reads Docker labels.
+- GitHub environment: `deploy`.
+- Push to `main` deploys only when a commit subject in the push starts with `release:` or `fix:` (including `fix(scope):`). `workflow_dispatch` always deploys. `[skip deploy]` in any commit message of the push skips it.
+- Hostinger `project-name` must be at least 3 characters (use the repo name).
 
-## Release Versioning (fullstack)
+### Dokploy / Coolify / generic Compose (`docker-compose`)
 
-The fullstack tier uses two chained workflows:
+The platform clones the repo and builds `Dockerfile` / `docker-compose.yml`. GitHub Actions only verifies (CI).
 
-1. **`release.yml`** — runs on push to main, bumps version, commits `chore(release): vX.Y.Z`, creates a git tag `vX.Y.Z`, and pushes.
-2. **`deploy.yml`** — triggered when `release.yml` completes successfully. Checks out the bumped commit, builds, and deploys.
+- Compose has `build:` and `expose:`. No Traefik labels (the platform owns routing / TLS).
+- Local ports go in `docker-compose.override.yml` (not used in production).
+- SQLite (if any) must use a **named volume**. Bind-mounting `./data` is wiped when Dokploy recreates the compose directory.
+- Set secrets in the platform Environment tab. Never bake them into the image.
 
-This means the deployed code always matches the version in `package.json`, and deploy can be re-run independently via `workflow_dispatch` without bumping again.
+## GitHub environment `deploy` (Hostinger)
 
-### Trigger filter
+| Kind | Name | Purpose |
+| --- | --- | --- |
+| Secret | `HOSTINGER_API_KEY` | Hostinger API (hPanel → API) |
+| Variable | `HOSTINGER_VM_ID` | Target VPS (from the VPS overview URL) |
+| Variable | `TRAEFIK_HOST` | Public hostname |
+| Variable | `TRAEFIK_ROUTER` / `TRAEFIK_ENTRYPOINT` / `TRAEFIK_CERTRESOLVER` | Traefik labels |
+| Variable | `PORT` | Host loopback publish port (container still listens on 8080) |
+| Variable | `HOST_UID` / `HOST_GID` | Container user (default 0) |
+| Secret | `DATABASE_URL` | Prisma / app database |
+| Secret | `NEXTAUTH_SECRET` / `SESSION_SECRET` | Auth (use the one your app needs) |
+| Secret | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth |
+| Variable | `GOOGLE_WORKSPACE_DOMAIN` | Optional login domain restriction |
 
-`release.yml` only fires on conventional commits, skipping `chore(release):` to avoid an infinite loop:
+App-specific secrets go on the same environment. The VPS must be able to pull GHCR (`docker login ghcr.io`, or a public package). Private GitHub repos need a VPS SSH deploy key under **Settings → Deploy keys**.
+
+## Conventional commits
+
+Branch off `main` (`feat/...`, `fix/...`, `chore/...`). Do not commit to `main` directly.
 
 ```
-feat:, fix:, hotfix:, chore:, refactor:, docs:, test:, perf:, style:
+feat:, fix:, hotfix:, chore:, refactor:, docs:, test:, perf:, style:, release:
 ```
 
-Commits that start with `chore(release):`, or any other prefix not in the list (e.g. `wip:`, `tmp:`), will not trigger a release.
+Hostinger deploys only for `release:` and `fix:` / `fix(scope):` subjects. `workflow_dispatch` always deploys.
 
-### Bump type
+## Dependabot
 
-Controlled by a flag in the commit message:
+Copied as `.github/dependabot.yml`:
 
-| Flag in message | Result |
-|-----------------|--------|
-| _(none)_ | patch |
-| `#minor` | minor |
-| `#major` | major |
-| `#none` | skip bump |
+- npm: weekly on Monday, Asia/Bangkok, grouped prod/dev, majors ignored
+- github-actions: monthly
+- docker: monthly
 
-Examples:
+Ecosystem is `npm` even for pnpm projects (Dependabot does not have a `pnpm` ecosystem).
 
-```bash
-git commit -m "fix: correct session expiry"           # → patch bump
-git commit -m "feat: add dashboard #minor"            # → minor bump
-git commit -m "feat!: new auth model #major"          # → major bump
-git commit -m "chore: update deps #none"              # → no bump, no deploy
-```
-
-Via `workflow_dispatch`, select the bump type manually in the GitHub Actions UI.
-
-### Tags
-
-Every release creates a git tag (`v1.2.3`) visible in GitHub's Releases / Tags page. Tags are pushed with `--follow-tags` alongside the version bump commit.
-
-## Templates
-
-All templates use `{{PLACEHOLDER}}` syntax replaced by the scaffold script:
+## Placeholders
 
 | Placeholder | Default | Used by |
 |-------------|---------|---------|
 | `{{PROJECT_NAME}}` | — | All |
 | `{{PNPM_VERSION}}` | 10 | All |
 | `{{NODE_VERSION}}` | 22 | All |
-| `{{APP_DIR}}` | /opt/{{PROJECT_NAME}} | Deploy |
-| `{{PM2_APP_NAME}}` | {{PROJECT_NAME}} | Fullstack |
+| `{{APP_DIR}}` | /opt/{{PROJECT_NAME}} | static-app deploy |
+
+## Templates
+
+```
+templates/
+  library/ci.yml
+  static-app/ci.yml
+  static-app/deploy.yml
+  docker-hostinger/ci.yml
+  docker-hostinger/deploy.yml
+  docker-compose/ci.yml
+  dependabot.yml
+  scripts/deploy-gate.sh
+```

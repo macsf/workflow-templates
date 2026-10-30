@@ -2,6 +2,14 @@ name: CI
 
 on:
   pull_request:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  workflow_dispatch:
+  # Called by deploy.yml so a deploy only goes out after this passes.
+  workflow_call:
 
 permissions:
   contents: read
@@ -9,6 +17,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -27,5 +36,7 @@ jobs:
       - run: pnpm typecheck
 
       - run: pnpm lint
+
+      - run: pnpm run --if-present test
 
       - run: pnpm build
