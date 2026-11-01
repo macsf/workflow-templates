@@ -64,8 +64,9 @@ The platform clones the repo and builds `Dockerfile` / `docker-compose.yml`. Git
 | Variable | `HOST_UID` / `HOST_GID` | Container user (default 0) |
 | Secret | `DATABASE_URL` | Prisma / app database |
 | Secret | `NEXTAUTH_SECRET` / `SESSION_SECRET` | Auth (use the one your app needs) |
-| Secret | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth |
-| Variable | `GOOGLE_WORKSPACE_DOMAIN` | Optional login domain restriction |
+| Variable | `GOOGLE_CLIENT_ID` | Google OAuth client id |
+| Secret | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| Variable | `ALLOWED_GOOGLE_DOMAIN` | Optional login domain restriction |
 
 App-specific secrets go on the same environment. The VPS must be able to pull GHCR (`docker login ghcr.io`, or a public package). Private GitHub repos need a VPS SSH deploy key under **Settings → Deploy keys**.
 
