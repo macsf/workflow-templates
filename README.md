@@ -84,9 +84,12 @@ Hostinger deploys only for `release:` and `fix:` / `fix(scope):` subjects. `work
 
 Copied as `.github/dependabot.yml`:
 
-- npm: weekly on Monday, Asia/Bangkok, grouped prod/dev, majors ignored
+- npm: monthly, Asia/Bangkok, 3 PRs max, 7-day cooldown, majors ignored
+- npm groups: `security` (security updates) and `routine` (minor/patch)
 - github-actions: monthly
 - docker: monthly
+
+Set `directories` to every folder that has a `package.json` (`/` alone misses subfolders). Remove the docker block if the project has no Dockerfile.
 
 Ecosystem is `npm` even for pnpm projects (Dependabot does not have a `pnpm` ecosystem).
 
