@@ -37,3 +37,7 @@ updates:
     schedule:
       interval: monthly
       timezone: Asia/Bangkok
+    # Major updates are reviewed by hand
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
